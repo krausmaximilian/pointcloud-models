@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 22.3.0
+    hooks:
+      - id: black
+        language_version: python3
+  - repo: https://gitlab.com/pycqa/flake8
+    rev: 3.9.2
+    hooks:
+      - id: flake8
+        additional_dependencies:
+          ["flake8-absolute-import==1.0.0.1", "flake8-alfred==1.1.1", "flake8-django==1.1.2"]
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v8.10.0  
+    hooks:
+      - id: eslint
+        files: \.([jt]sx?$)|(vue$)
+        types: [file]
+        args: ["--ext", ".js,.vue,.jsx", "--max-warnings=0"]
+        additional_dependencies:
+          - eslint@^8.8.0
+          - eslint-config-prettier@^8.3.0
+          - eslint-plugin-prettier@^3.3.1
+          - eslint-plugin-promise@^5.1.0
+          - eslint-plugin-vue@^8.4.0
+          - eslint-plugin-import@^2.26.0
+          - eslint-import-resolver-alias@^1.1.2
+          - prettier@^2.2.1

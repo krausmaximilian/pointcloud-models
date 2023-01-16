@@ -1,0 +1,5 @@
+torch>=1.13.1
+git+https://github.com/torch-points3d/torch-points-kernels # pypi package not supported on m1 mac
+numpy>=1.20.0
+mlflow>=2.1.1
+yacs>=0.1.8
