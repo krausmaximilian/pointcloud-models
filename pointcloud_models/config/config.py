@@ -16,7 +16,6 @@ class Config:
         self._C.DATASET = Cn()
         self._C.TASK = os.getenv("TASK", "semantic_segmentation")
 
-
         self._C.DATASET.NUM_CLASSES = os.getenv("NUM_CLASSES", None)
         self._C.DATASET.DATA_DIMENSION = os.getenv("DATA_DIMENSION", None)
         self._C.DATASET.DATASET_TYPE = os.getenv("DATASET_TYPE", None)

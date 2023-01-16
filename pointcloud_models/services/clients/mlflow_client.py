@@ -4,20 +4,20 @@ from yacs.config import CfgNode
 
 
 class MlFlowClient:
-    def __init__(self, config: CfgNode):
-        self.config = config
-        os.environ["MLFLOW_TRACKING_USERNAME"] = config.MLFLOW.USERNAME
-        os.environ["MLFLOW_TRACKING_PASSWORD"] = config.MLFLOW.PASSWORD
-        os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = config.MLFLOW.IGNORE_SSL_VERIFY
-        mlflow.set_tracking_uri(config.MLFLOW.TRACKING_URL)
+    def __init__(self, cfg: CfgNode):
+        self.cfg = cfg
+        os.environ["MLFLOW_TRACKING_USERNAME"] = cfg.MLFLOW.USERNAME
+        os.environ["MLFLOW_TRACKING_PASSWORD"] = cfg.MLFLOW.PASSWORD
+        os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = cfg.MLFLOW.IGNORE_SSL_VERIFY
+        mlflow.set_tracking_uri(cfg.MLFLOW.TRACKING_URL)
         self.experiment = None
 
     def __del__(self):
         mlflow.end_run()
 
     def start_run(self):
-        mlflow.set_experiment(self.config.MLFLOW.EXPERIMENT_NAME)
-        self.experiment = mlflow.get_experiment_by_name(self.config.MLFLOW.EXPERIMENT_NAME)
+        mlflow.set_experiment(self.cfg.MLFLOW.EXPERIMENT_NAME)
+        self.experiment = mlflow.get_experiment_by_name(self.cfg.MLFLOW.EXPERIMENT_NAME)
         mlflow.start_run(experiment_id=self.experiment.experiment_id)
 
     def log_initial_params(self):
