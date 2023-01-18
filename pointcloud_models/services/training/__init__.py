@@ -1,3 +1,4 @@
 from pointcloud_models.services.training.abstract_training_service import AbstractTrainingService, TRAINING_REGISTRY
+from pointcloud_models.services.training.semantic_segmentation_training_service import SemanticSegmentationTrainingService
 
-__all__ = ("AbstractTrainingService", "TRAINING_REGISTRY", )
+__all__ = ("TRAINING_REGISTRY", )

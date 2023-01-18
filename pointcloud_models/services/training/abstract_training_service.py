@@ -28,7 +28,7 @@ class AbstractTrainingService(ABC):
 
     def __init_subclass__(cls, task=None, **kwargs):
         super().__init_subclass__(**kwargs)
-        pass
+        register_class(cls)
 
     @abstractmethod
     def training_loop(self):
