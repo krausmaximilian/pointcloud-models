@@ -156,6 +156,7 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
         tp, fp, fn, tn = get_segmentation_statistics(predicted_labels, labels)
         return tp, fp, fn, tn, loss_sum, loss
 
+    @torch.no_grad()
     def _validation(self, points, labels, loss_sum):
         points = torch.Tensor(points)
         points, labels = points.float().to(device=self.training_setup.device), labels.long().to(
