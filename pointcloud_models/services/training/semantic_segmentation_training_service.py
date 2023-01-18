@@ -101,7 +101,7 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
                     validation_bar.update(
                         i,
                         values=[
-                            ("validation_mean_loss", validation_loss_sum.item() / (i+1)),
+                            ("validation_mean_loss", validation_loss_sum.item() / (i + 1)),
                             ("validation_mean_acc", mean_validation_accuracy_average_class / (i + 1)),
                             ("validation_mean_iou", mean_validation_iou_average_class / (i + 1))
                         ],
@@ -169,3 +169,7 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
         predicted_labels = predictions.data.max(1)[1]
         tp, fp, fn, tn = get_segmentation_statistics(predicted_labels, labels)
         return tp, fp, fn, tn, loss_sum, loss
+
+    def _early_stopping(self):
+        # TODO implement early stopping stuff
+        pass
