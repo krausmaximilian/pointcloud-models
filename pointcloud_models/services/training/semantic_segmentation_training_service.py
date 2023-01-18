@@ -25,7 +25,7 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
 
         for epoch in range(start_epoch, self.config.cfg.OPTIMIZER.EPOCHS):
             num_batches = len(self.training_setup.train_data_loader)
-            bar = pkbar.Kbar(
+            training_bar = pkbar.Kbar(
                 target=num_batches,
                 epoch=epoch,
                 num_epochs=self.config.cfg.OPTIMIZER.EPOCHS,
@@ -33,9 +33,6 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
                     "train_mean_loss",
                     "train_mean_acc",
                     "train_mean_iou",
-                    "val_mean_loss",
-                    "val_mean_acc",
-                    "val_mean_iou",
                 ],
             )
             training_loss_sum = 0
@@ -59,7 +56,7 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
                 mean_train_accuracy_average_class += average_accuracy_per_batch
                 mean_train_iou_average_class += average_iou_per_batch
 
-                bar.update(
+                training_bar.update(
                     i,
                     values=[
                         ("train_mean_loss", training_loss_sum.item()),
@@ -76,6 +73,17 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
 
             # validation epoch
             with torch.no_grad():
+                num_batches = len(self.training_setup.valid_data_loader)
+                validation_bar = pkbar.Kbar(
+                    target=num_batches,
+                    epoch=epoch,
+                    num_epochs=self.config.cfg.OPTIMIZER.EPOCHS,
+                    stateful_metrics=[
+                        "validation_mean_loss",
+                        "validation_mean_acc",
+                        "validation_mean_iou",
+                    ],
+                )
                 self.training_setup.model = self.training_setup.model.eval()
                 validation_loss_sum = 0
                 mean_validation_accuracy_average_class, mean_validation_iou_average_class = 0, 0
@@ -90,20 +98,19 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
                     mean_validation_iou_average_class += average_iou_per_batch
                     per_class_validation_iou += per_class_iou_per_batch
 
-                    bar.update(
+                    validation_bar.update(
                         i,
                         values=[
-                            ("validation_mean_loss", validation_loss_sum.item()),
+                            ("validation_mean_loss", validation_loss_sum.item() / (i+1)),
                             ("validation_mean_acc", mean_validation_accuracy_average_class / (i + 1)),
                             ("validation_mean_iou", mean_validation_iou_average_class / (i + 1))
                         ],
                     )
 
-                result_mean_iou_average_class = mean_validation_iou_average_class / len(self.training_setup.valid_data_loader)
-                result_mean_loss = (validation_loss_sum / len(self.training_setup.valid_data_loader)).item()
-                result_mean_accuracy_average_class = mean_validation_accuracy_average_class / len(
-                    self.training_setup.valid_data_loader)
-                result_per_class_validation_iou = per_class_validation_iou / len(self.training_setup.valid_data_loader)
+                result_mean_iou_average_class = mean_validation_iou_average_class / num_batches
+                result_mean_loss = (validation_loss_sum / num_batches).item()
+                result_mean_accuracy_average_class = mean_validation_accuracy_average_class / num_batches
+                result_per_class_validation_iou = per_class_validation_iou / num_batches
                 # TODO add normal accuracy, not average of class, total and log
                 logging.info(f"validation mean loss: {result_mean_loss}")
                 logging.info(f"validation point avg class IoU: {result_mean_iou_average_class}")

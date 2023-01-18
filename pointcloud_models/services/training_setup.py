@@ -7,10 +7,11 @@ from pointcloud_models.losses import LOSS_REGISTRY
 from pointcloud_models.services.clients.mlflow_client import MlFlowClient
 from pointcloud_models.utils.exceptions import TaskException, ModelNotImplementedError, LossFunctionNotImplementedError
 
+
 # TODO add early stopping implementation
 # TODO add optimizer here
 # TODO add scheduler here
-# TODO add dataloaders here
+# TODO add dataloaders here, valid dataloader must have batchsize 1
 # TODO add checkpoint load here
 
 class TrainingSetup:
