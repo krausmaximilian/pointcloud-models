@@ -87,7 +87,7 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
                 self.training_setup.model = self.training_setup.model.eval()
                 validation_loss_sum = 0
                 mean_validation_accuracy_average_class, mean_validation_iou_average_class = 0, 0
-                per_class_validation_iou = torch.zeros(self.config.cfg.DATASET.NUM_CLASSES)
+                result_per_class_validation_iou = torch.zeros(self.config.cfg.DATASET.NUM_CLASSES)
                 for i, (points, labels) in enumerate(self.training_setup.valid_data_loader, 1):
                     tp, fp, fn, tn, validation_loss_sum, loss = self._validation(points, labels, validation_loss_sum)
                     average_iou_per_batch = iou_score(tp, fp, fn, tn, reduction="macro")
@@ -96,7 +96,7 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
 
                     mean_validation_accuracy_average_class += average_accuracy_per_batch
                     mean_validation_iou_average_class += average_iou_per_batch
-                    per_class_validation_iou += per_class_iou_per_batch
+                    result_per_class_validation_iou += per_class_iou_per_batch
 
                     validation_bar.update(
                         i,
@@ -110,14 +110,14 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
                 result_mean_iou_average_class = mean_validation_iou_average_class / num_batches
                 result_mean_loss = (validation_loss_sum / num_batches).item()
                 result_mean_accuracy_average_class = mean_validation_accuracy_average_class / num_batches
-                result_per_class_validation_iou = per_class_validation_iou / num_batches
+                result_per_class_validation_iou = result_per_class_validation_iou / num_batches
                 # TODO add normal accuracy, not average of class, total and log
                 logging.info(f"validation mean loss: {result_mean_loss}")
                 logging.info(f"validation point avg class IoU: {result_mean_iou_average_class}")
                 logging.info(f"validation point avg class accuracy: {result_mean_accuracy_average_class}")
                 iou_per_class_str = "------- IoU --------\n"
-                for index in range(per_class_validation_iou):
-                    iou_per_class_str += f"class {index}, IoU: {per_class_validation_iou[index].item()} \n"
+                for index in range(result_per_class_validation_iou):
+                    iou_per_class_str += f"class {index}, IoU: {result_per_class_validation_iou[index].item()} \n"
                 logging.info(iou_per_class_str)
 
                 # TODO if mlflow is active, log mean iou, average class acc, acc, and iou per class
