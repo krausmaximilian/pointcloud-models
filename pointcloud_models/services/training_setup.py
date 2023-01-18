@@ -3,12 +3,9 @@ import logging
 from yacs.config import CfgNode
 
 from pointcloud_models.models import MODEL_REGISTRY
-from pointcloud_models.metrics import METRIC_REGISTRY
 from pointcloud_models.losses import LOSS_REGISTRY
 from pointcloud_models.services.clients.mlflow_client import MlFlowClient
-from pointcloud_models.utils.exceptions import TaskException, ModelNotImplementedError, LossFunctionNotImplementedError, \
-    MetricNotImplementedError
-
+from pointcloud_models.utils.exceptions import TaskException, ModelNotImplementedError, LossFunctionNotImplementedError
 
 # TODO add early stopping implementation
 # TODO add optimizer here
@@ -24,16 +21,14 @@ class TrainingSetup:
         self.criterion = None
         self.mlflow_client = None
         self.train_data_loader = None
-        self.valid_data_laoder = None
+        self.valid_data_loader = None
         self.optimizer = None
         self.lr_scheduler = None
-        self.metrics = []
         self.device = None
 
     def run(self):
         self.initialize_model()
         self.initialize_loss_function()
-        self.initialize_metrics()
         self.initialize_train_and_validation_datasets()
         self.initialize_mlflow_client()
 
@@ -56,15 +51,6 @@ class TrainingSetup:
         except KeyError:
             raise LossFunctionNotImplementedError(
                 f"Specified loss {self.cfg.OPTIMIZER.LOSS_FUNCTION} not implemented.")
-
-    def initialize_metrics(self):
-        logging.info("Initializing metrics ...")
-        for metric in self.cfg.SYSTEM.METRICS:
-            try:
-                self.metrics.append(METRIC_REGISTRY[metric.lower()]())
-            except KeyError:
-                raise MetricNotImplementedError(
-                    f"Specified loss {self.cfg.OPTIMIZER.LOSS_FUNCTION} not implemented.")
 
     def initialize_train_and_validation_datasets(self):
         logging.info("Initializing datasets for training and validation ...")

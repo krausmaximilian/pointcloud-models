@@ -1,20 +1,22 @@
 import logging
 
+import pkbar
 import torch
 
+from pointcloud_models.metrics import get_segmentation_statistics
 from pointcloud_models.services.training import AbstractTrainingService
+from pointcloud_models.metrics.functional_segmentation_metrics import iou_score, accuracy
 
 
 class SemanticSegmentationTrainingService(AbstractTrainingService):
+    MOMENTUM_ORIGINAL = 0.1
+    MOMENTUM_DECAY = 0.5
+    MOMENTUM_DECAY_STEP = 10
+
     def training_loop(self):
         def bn_momentum_adjust(m, momentum):
             if isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm1d):
                 m.momentum = momentum
-
-        LEARNING_RATE_CLIP = 1e-5
-        MOMENTUM_ORIGINAL = 0.1
-        MOMENTUM_DECAY = 0.5
-        MOMENTUM_DECAY_STEP = 10
 
         # TODO getting start epoch from checkpoint
         start_epoch = 0
@@ -23,161 +25,140 @@ class SemanticSegmentationTrainingService(AbstractTrainingService):
 
         for epoch in range(start_epoch, self.config.cfg.OPTIMIZER.EPOCHS):
             num_batches = len(self.training_setup.train_data_loader)
-
-            total_correct = 0
-            total_seen = 0
-            loss_sum = 0
-
-            # logger.info("\nEpoch: {}".format(epoch))
-            momentum = MOMENTUM_ORIGINAL * (
-                    MOMENTUM_DECAY ** (epoch // MOMENTUM_DECAY_STEP)
+            bar = pkbar.Kbar(
+                target=num_batches,
+                epoch=epoch,
+                num_epochs=self.config.cfg.OPTIMIZER.EPOCHS,
+                stateful_metrics=[
+                    "train_mean_loss",
+                    "train_mean_acc",
+                    "train_mean_iou",
+                    "val_mean_loss",
+                    "val_mean_acc",
+                    "val_mean_iou",
+                ],
+            )
+            training_loss_sum = 0
+            momentum = self.MOMENTUM_ORIGINAL * (
+                    self.MOMENTUM_DECAY ** (epoch // self.MOMENTUM_DECAY_STEP)
             )
             if momentum < 0.01:
                 momentum = 0.01
-            # logger.info("BN momentum updated to: %f" % momentum)
-            model = model.apply(lambda x: bn_momentum_adjust(x, momentum))
+            logging.info("BN momentum updated to: %f" % momentum)
+            self.training_setup.model = self.training_setup.model.apply(lambda x: bn_momentum_adjust(x, momentum))
+
+            mean_train_accuracy_average_class = 0
+            mean_train_iou_average_class = 0
 
             for i, (points, labels) in enumerate(self.training_setup.train_data_loader):
-                model = model.train()
-                points = points.data.numpy()
-                # TODO Randomly rotated point cloud around z axis
+                self.training_setup.model = self.training_setup.model.train()
+                tp, fp, fn, tn, training_loss_sum, loss = self._train(points, labels, training_loss_sum)
+                average_iou_per_batch = iou_score(tp, fp, fn, tn, reduction="macro")
+                average_accuracy_per_batch = accuracy(tp, fp, fn, tn, reduction="macro")
 
-                points = torch.Tensor(points)
+                mean_train_accuracy_average_class += average_accuracy_per_batch
+                mean_train_iou_average_class += average_iou_per_batch
 
-                if self.training_setup.device != torch.device("cpu"):
-                    points, labels = points.float().cuda(device=self.training_setup.device), labels.long().cuda(
-                        device=self.training_setup.device)
-                else:
-                    points, labels = points.float(), labels.long()
-
-                points = points.transpose(2, 1)
-                self.training_setup.optimizer.zero_grad()
-
-                predictions = model(points)
-
-                predictions = predictions.contiguous().view(-1, self.config.cfg.DATASET.NUM_CLASSES)
-                # batch_label = labels.view(-1, 1)[:, 0].cpu().data.numpy()
-                labels = labels.view(-1, 1)[:, 0]
-                loss = self.training_setup.criterion(seg_pred, labels)
-                loss.backward()
-                self.training_setup.optimizer.step()
-
-                pred_choice = seg_pred.cpu().data.max(1)[1].numpy()
-                correct = np.sum(pred_choice == batch_label)
-                total_correct += correct
-                total_seen += c.OPTIMIZER.batch_size * c.DATASET.num_points
-                loss_sum += loss
-            logger.info("Training mean loss: %f" % (loss_sum / num_batches).item())
-            logger.info("Training accuracy: %f" % (total_correct / float(total_seen)))
-
-            if c.MLFLOW.active:
-                mlflow.log_metric(
-                    "learning_rate", optimizer.param_groups[0]["lr"], step=epoch
-                )
-                mlflow.log_metric("train_loss", (loss_sum / num_batches).item(), step=epoch)
-                mlflow.log_metric(
-                    "train_accuracy", total_correct / float(total_seen), step=epoch
+                bar.update(
+                    i,
+                    values=[
+                        ("train_mean_loss", training_loss_sum.item()),
+                        ("train_mean_acc", mean_train_accuracy_average_class / (i + 1)),
+                        ("train_mean_iou", mean_train_iou_average_class / (i + 1))
+                    ],
                 )
 
-            # validation epcoh
+            logging.info(f"Training mean loss: {(training_loss_sum / num_batches).item()}")
+            logging.info(f"Training point avg class accuracy: {mean_train_accuracy_average_class / num_batches}")
+            logging.info(f"Training point avg class IoU: {mean_train_iou_average_class / num_batches}")
+
+            # TODO log current learning rate, current loss, current accuracy, current iou to mlflow if active
+
+            # validation epoch
             with torch.no_grad():
-                model = model.eval()
-                num_batches = len(valid_data_loader)
-                total_correct = 0
-                total_seen = 0
-                loss_sum = 0
-                labelweights = np.zeros(c.DATASET.num_classes)
-                total_seen_class = [0 for _ in range(c.DATASET.num_classes)]
-                total_correct_class = [0 for _ in range(c.DATASET.num_classes)]
-                total_iou_deno_class = [0 for _ in range(c.DATASET.num_classes)]
-                for i, (points, labels) in enumerate(valid_data_loader, 1):
-                    points = points.data.numpy()
-                    points = torch.Tensor(points)
-                    if device != torch.device("cpu"):
-                        points, labels = points.float().cuda(device=device), labels.long().cuda(device=device)
-                    else:
-                        points, labels = points.float(), labels.long()
-                    points = points.transpose(2, 1)
-                    seg_pred, trans_feat = model(points)
-                    pred_val = seg_pred.contiguous().cpu().data.numpy()
-                    seg_pred = seg_pred.contiguous().view(-1, c.DATASET.num_classes)
-                    batch_label = labels.cpu().data.numpy()
-                    labels = labels.view(-1, 1)[:, 0]
-                    loss = criterion(seg_pred, labels)
-                    loss_sum += loss
-                    pred_val = np.argmax(pred_val, 2)
-                    correct = np.sum((pred_val == batch_label))
-                    total_correct += correct
-                    total_seen += c.OPTIMIZER.batch_size * c.DATASET.num_points
-                    tmp, _ = np.histogram(batch_label, range(c.DATASET.num_classes + 1))
-                    labelweights += tmp
-                    for l in range(c.DATASET.num_classes):
-                        total_seen_class[l] += np.sum((batch_label == l))
-                        total_correct_class[l] += np.sum(
-                            (pred_val == l) & (batch_label == l)
-                        )
-                        total_iou_deno_class[l] += np.sum(
-                            ((pred_val == l) | (batch_label == l))
-                        )
-                labelweights = labelweights.astype(np.float32) / np.sum(
-                    labelweights.astype(np.float32)
-                )
-                mIoU = np.mean(
-                    np.array(total_correct_class)
-                    / (np.array(total_iou_deno_class, dtype=np.float) + 1e-6)
-                )
-                logger.info("eval mean loss: %f" % (loss_sum / float(num_batches)).item())
-                logger.info("eval point avg class IoU: %f" % (mIoU))
-                logger.info("eval point accuracy: %f" % (total_correct / float(total_seen)))
-                logger.info(
-                    "eval point avg class acc: %f"
-                    % (
-                        np.mean(
-                            np.array(total_correct_class)
-                            / (np.array(total_seen_class, dtype=np.float) + 1e-6)
-                        )
+                self.training_setup.model = self.training_setup.model.eval()
+                validation_loss_sum = 0
+                mean_validation_accuracy_average_class, mean_validation_iou_average_class = 0, 0
+                per_class_validation_iou = torch.zeros(self.config.cfg.DATASET.NUM_CLASSES)
+                for i, (points, labels) in enumerate(self.training_setup.valid_data_loader, 1):
+                    tp, fp, fn, tn, validation_loss_sum, loss = self._validation(points, labels, validation_loss_sum)
+                    average_iou_per_batch = iou_score(tp, fp, fn, tn, reduction="macro")
+                    per_class_iou_per_batch = iou_score(tp, fp, fn, tn, reduction=None).sum(0)
+                    average_accuracy_per_batch = accuracy(tp, fp, fn, tn, reduction="macro")
+
+                    mean_validation_accuracy_average_class += average_accuracy_per_batch
+                    mean_validation_iou_average_class += average_iou_per_batch
+                    per_class_validation_iou += per_class_iou_per_batch
+
+                    bar.update(
+                        i,
+                        values=[
+                            ("validation_mean_loss", validation_loss_sum.item()),
+                            ("validation_mean_acc", mean_validation_accuracy_average_class / (i + 1)),
+                            ("validation_mean_iou", mean_validation_iou_average_class / (i + 1))
+                        ],
                     )
-                )
+
+                result_mean_iou_average_class = mean_validation_iou_average_class / len(self.training_setup.valid_data_loader)
+                result_mean_loss = (validation_loss_sum / len(self.training_setup.valid_data_loader)).item()
+                result_mean_accuracy_average_class = mean_validation_accuracy_average_class / len(
+                    self.training_setup.valid_data_loader)
+                result_per_class_validation_iou = per_class_validation_iou / len(self.training_setup.valid_data_loader)
+                # TODO add normal accuracy, not average of class, total and log
+                logging.info(f"validation mean loss: {result_mean_loss}")
+                logging.info(f"validation point avg class IoU: {result_mean_iou_average_class}")
+                logging.info(f"validation point avg class accuracy: {result_mean_accuracy_average_class}")
                 iou_per_class_str = "------- IoU --------\n"
-                for l in range(c.DATASET.num_classes):
-                    iou_per_class_str += "class %s weight: %.3f, IoU: %.3f \n" % (
-                        str(l) + " ",
-                        labelweights[l],
-                        total_correct_class[l] / float(total_iou_deno_class[l]),
-                    )
+                for index in range(per_class_validation_iou):
+                    iou_per_class_str += f"class {index}, IoU: {per_class_validation_iou[index].item()} \n"
+                logging.info(iou_per_class_str)
 
-                logger.info(iou_per_class_str)
+                # TODO if mlflow is active, log mean iou, average class acc, acc, and iou per class
 
-                if c.MLFLOW.active:
-                    mlflow.log_metric("valid_iou", mIoU, step=epoch)
-                    mlflow.log_metric(
-                        "valid_loss", (loss_sum / float(num_batches)).item(), step=epoch
-                    )
-                    mlflow.log_metric(
-                        "valid_accuracy", total_correct / float(total_seen), step=epoch
-                    )
-                    for r in range(c.DATASET.num_classes):
-                        mlflow.log_metric(
-                            "valid_iou_c" + str(r),
-                            total_correct_class[r] / float(total_iou_deno_class[r]),
-                            step=epoch,
-                        )
+            # TODO consider using something else than loss here?
+            self.training_setup.scheduler.step(result_mean_loss)
 
-            scheduler.step((loss_sum / float(num_batches)).item())
+            if result_mean_iou_average_class > max_iou:
+                max_iou = result_mean_iou_average_class
+                best_model = self.training_setup.model
+                # TODO save checkpoint and model
 
-            if mIoU > max_iou:
-                max_iou = mIoU
-                best_model = model
-                save_checkpoint(
-                    best_model, c, epoch, optimizer, (loss_sum / float(num_batches)).item()
-                )
-
-            early_stopping((loss_sum / float(num_batches)).item(), model)
-            if early_stopping.early_stop:
-                logger.info("Early Stopping")
-                break
+            # TODO early stopping
 
         # save best model for inference
-        save_model(best_model, c, max_iou)
-        if c.MLFLOW.active:
-            mlflow.end_run()
+        # TODO save the best model
+
+    def _train(self, points, labels, loss_sum):
+        # TODO Randomly rotated point cloud around z axis
+        points = torch.Tensor(points)
+        points, labels = points.float().to(device=self.training_setup.device), labels.long().to(
+            device=self.training_setup.device)
+        points = points.transpose(2, 1)
+        self.training_setup.optimizer.zero_grad()
+        predictions = self.training_setup.model(points)
+        predictions_for_loss = predictions.contiguous().view(-1, self.training_setup.cfg.DATASET.NUM_CLASSES)
+        labels_for_loss = labels.view(-1, 1)[:, 0]
+
+        loss = self.training_setup.criterion(predictions_for_loss, labels_for_loss)
+        loss.backward()
+        loss_sum += loss
+
+        self.training_setup.optimizer.step()
+
+        predicted_labels = predictions.data.max(1)[1]
+        tp, fp, fn, tn = get_segmentation_statistics(predicted_labels, labels)
+        return tp, fp, fn, tn, loss_sum, loss
+
+    def _validation(self, points, labels, loss_sum):
+        points = torch.Tensor(points)
+        points, labels = points.float().to(device=self.training_setup.device), labels.long().to(
+            device=self.training_setup.device)
+        points = points.transpose(2, 1)
+        predictions = self.training_setup.model(points)
+        predictions_for_loss = predictions.contiguous().view(-1, self.training_setup.cfg.DATASET.NUM_CLASSES)
+        labels_for_loss = labels.view(-1, 1)[:, 0]
+        loss = self.training_setup.criterion(predictions_for_loss, labels_for_loss)
+        loss_sum += loss
+        predicted_labels = predictions.data.max(1)[1]
+        tp, fp, fn, tn = get_segmentation_statistics(predicted_labels, labels)
+        return tp, fp, fn, tn, loss_sum, loss
